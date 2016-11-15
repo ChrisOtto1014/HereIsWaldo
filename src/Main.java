@@ -1,7 +1,17 @@
 import java.io.InputStream;
 import java.net.URL;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.stream.Collectors;
 
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
@@ -19,34 +29,61 @@ import org.xml.sax.helpers.DefaultHandler;
 public class Main {
 
     private static final String BUCKET = "http://s3.amazonaws.com/waldo-recruiting";
+    private static final ExecutorService executor3 = Executors.newFixedThreadPool(2);
+    // TODO - mimic messaging service of sorts to hand-off from one process to another
+    private static final BlockingQueue<Contents> sharedQueue = new LinkedBlockingQueue<>();
+
+    // TODO - use database
+    private static final Set<String> uniqueArtists = new TreeSet<>();
+    private static final Set<Contents> uniqueContents = new HashSet<>();
+    private static final Set<LocalDate> uniqueDates = new TreeSet<>();
+    private static final Set<String> uniqueMakes = new TreeSet<>();
+    private static final Set<String> uniqueModels = new TreeSet<>();
 
     public static void main(String[] args) throws Exception {
 
-        BlockingQueue<Contents> sharedQueue = new LinkedBlockingQueue<>();
+        // TODO - use executors for fail-safe behavior
+        ExecutorService executor1 = Executors.newFixedThreadPool(1);
+        ExecutorService executor2 = Executors.newFixedThreadPool(1);
 
-        Thread producerThread = new Thread(new Producer(sharedQueue));
-        Thread consumerThread = new Thread(new Consumer(sharedQueue));
+        executor1.execute(new Consumer());
+        executor2.execute(new Producer());
+    }
 
-        producerThread.start();
-        consumerThread.start();
+    // TODO - regex
+    private static Set<Contents> queryOnArtist(String artist) {
+        return uniqueContents.stream().filter(c -> Objects.equals(artist, c.artist))
+                .collect(Collectors.toCollection(TreeSet::new));
+    }
+
+    // TODO - more robust - allow "around noon", etc
+    private static Set<Contents> queryOnDate(LocalDate date) {
+        return uniqueContents.stream().filter(c -> Objects.equals(date, c.date))
+                .collect(Collectors.toCollection(TreeSet::new));
+    }
+
+    // TODO - regex
+    private static Set<Contents> queryOnMake(String make) {
+        return uniqueContents.stream().filter(c -> Objects.equals(make, c.make))
+                .collect(Collectors.toCollection(TreeSet::new));
+    }
+
+    // TODO - regex
+    private static Set<Contents> queryOnModel(String model) {
+        return uniqueContents.stream().filter(c -> Objects.equals(model, c.model))
+                .collect(Collectors.toCollection(TreeSet::new));
     }
 
     private static class Consumer implements Runnable {
-
-        private final BlockingQueue<Contents> sharedQueue;
-
-        public Consumer(BlockingQueue<Contents> sharedQueue) {
-            this.sharedQueue = sharedQueue;
-        }
 
         @Override
         public void run() {
             while (true) {
                 try {
                     Contents contents = sharedQueue.take();
-                    System.out.println("Consumed: " + contents);
+                    System.out.println(Thread.currentThread().getName() + ": Consumed: " + contents);
                     if (contents != null) {
-                        contents.parseExif();
+                        executor3.execute(new Parser(contents));
                     }
                 } catch (InterruptedException ex) {
                     ex.printStackTrace();
@@ -58,11 +95,34 @@ public class Main {
     private static class Contents {
         private static final String ARTIST = "Artist";
         private static final String CREATE_DATE = "Create Date";
+        private static final String CREATE_DATE_PATTERN = "yyyy:MM:dd HH:mm:ss";
         private static final String MAKE = "Make";
         private static final String MODEL = "Model";
+        String artist;
+        LocalDate date;
         String filename;
         String lastModified;
+        String make;
+        String model;
         String size;
+
+        public boolean equals(Object o) {
+            if (this == o)
+                return true;
+            if (o instanceof Contents) {
+                Contents that = (Contents) o;
+                return this.filename.equals(that.filename);
+            }
+            return false;
+        }
+
+        public int hashCode() {
+            return this.filename.hashCode();
+        }
+
+        public boolean isValid() {
+            return this.filename != null;
+        }
 
         public void parseExif() {
             try {
@@ -70,18 +130,38 @@ public class Main {
                 URL url = new URL(uri);
                 InputStream stream = url.openStream();
                 IImageMetadata metadata = Sanselan.getMetadata(stream, filename);
-                System.out.println(uri);
+                System.out.println(Thread.currentThread().getName() + " Parsed: " + uri);
                 for (Object o : metadata.getItems()) {
                     Item item = (Item) o;
-                    String key = item.getKeyword();
+                    String key = trim(item.getKeyword());
+                    String txt = trim(item.getText());
                     switch (key) {
                     case ARTIST:
-                    case CREATE_DATE:
+                        uniqueArtists.add(txt);
+                        artist = txt;
+                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        break;
                     case MAKE:
+                        uniqueMakes.add(txt);
+                        make = txt;
+                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        break;
                     case MODEL:
-                        System.out.println("  " + item.getKeyword() + " : " + item.getText());
+                        uniqueModels.add(txt);
+                        model = txt;
+                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        break;
+                    case CREATE_DATE:
+                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(CREATE_DATE_PATTERN)
+                                .withZone(ZoneId.systemDefault());
+                        date = LocalDate.parse(txt, formatter);
+                        uniqueDates.add(date);
+                        System.out.println("  " + key + " : " + date);
+                        break;
                     }
                 }
+                uniqueContents.add(this);
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -90,15 +170,35 @@ public class Main {
         public String toString() {
             return filename + ", size = " + size + ", lastModified = " + lastModified;
         }
+
+        private String trim(String s) {
+            int i0 = 0;
+            int i1 = s.length();
+            if (s.charAt(0) == '\'') {
+                i0++;
+            }
+            if (s.charAt(i1 - 1) == '\'') {
+                i1--;
+            }
+            return s.substring(i0, i1);
+        }
+    }
+
+    private static class Parser implements Runnable {
+
+        private Contents contents;
+
+        Parser(Contents c) {
+            this.contents = c;
+        }
+
+        @Override
+        public void run() {
+            contents.parseExif();
+        }
     }
 
     private static class Producer implements Runnable {
-
-        private final BlockingQueue<Contents> sharedQueue;
-
-        public Producer(BlockingQueue<Contents> sharedQueue) {
-            this.sharedQueue = sharedQueue;
-        }
 
         @Override
         public void run() {
@@ -168,9 +268,12 @@ public class Main {
             public void endElement(String uri, String localName, String qName) throws SAXException {
                 System.out.println(Thread.currentThread().getName() + ": endElement " + qName);
                 if (CONTENTS_NODE.equals(qName)) {
-                    System.out.println(Thread.currentThread().getName() + ": produce " + contents);
+                    System.out.println(Thread.currentThread().getName() + ": Produced " + contents);
                     try {
-                        sharedQueue.put(contents);
+                        if (contents.isValid())
+                            sharedQueue.put(contents);
+                        else
+                            System.out.println(Thread.currentThread().getName() + ": Invalid " + contents);
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
