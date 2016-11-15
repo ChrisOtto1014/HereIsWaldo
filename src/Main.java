@@ -17,8 +17,6 @@ import org.xml.sax.helpers.DefaultHandler;
 
 public class Main {
 
-    private static final String AWS_ACCESS_KEY_ID = "AKIAIBQOACWWWCOAQIHA";
-    private static final String AWS_SECRET_ACCESS_KEY = "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";
     private static final String BUCKET = "http://s3.amazonaws.com/waldo-recruiting";
 
     public static void main(String[] args) throws Exception {
