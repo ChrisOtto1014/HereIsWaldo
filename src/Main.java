@@ -11,6 +11,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import javax.xml.parsers.SAXParser;
@@ -76,23 +78,26 @@ public class Main {
 
     private static class Consumer implements Runnable {
 
+        private static final Logger LOGGER = Logger.getLogger(Consumer.class.getName());
+
         @Override
         public void run() {
             while (true) {
                 try {
                     Contents contents = sharedQueue.take();
-                    System.out.println(Thread.currentThread().getName() + ": Consumed: " + contents);
+                    LOGGER.info("Consumed: " + contents);
                     if (contents != null) {
                         executor3.execute(new Parser(contents));
                     }
                 } catch (InterruptedException ex) {
-                    ex.printStackTrace();
+                    LOGGER.log(Level.WARNING, ex.getMessage(), ex);
                 }
             }
         }
     }
 
     private static class Contents {
+        private static final Logger LOGGER = Logger.getLogger(Contents.class.getName());
         private static final String ARTIST = "Artist";
         private static final String CREATE_DATE = "Create Date";
         private static final String CREATE_DATE_PATTERN = "yyyy:MM:dd HH:mm:ss";
@@ -130,7 +135,7 @@ public class Main {
                 URL url = new URL(uri);
                 InputStream stream = url.openStream();
                 IImageMetadata metadata = Sanselan.getMetadata(stream, filename);
-                System.out.println(Thread.currentThread().getName() + " Parsed: " + uri);
+                LOGGER.info("Parsed: " + uri);
                 for (Object o : metadata.getItems()) {
                     Item item = (Item) o;
                     String key = trim(item.getKeyword());
@@ -139,31 +144,31 @@ public class Main {
                     case ARTIST:
                         uniqueArtists.add(txt);
                         artist = txt;
-                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        LOGGER.info("  " + key + " : \"" + txt + "\"");
                         break;
                     case MAKE:
                         uniqueMakes.add(txt);
                         make = txt;
-                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        LOGGER.info("  " + key + " : \"" + txt + "\"");
                         break;
                     case MODEL:
                         uniqueModels.add(txt);
                         model = txt;
-                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        LOGGER.info("  " + key + " : \"" + txt + "\"");
                         break;
                     case CREATE_DATE:
-                        System.out.println("  " + key + " : \"" + txt + "\"");
+                        LOGGER.info("  " + key + " : \"" + txt + "\"");
                         DateTimeFormatter formatter = DateTimeFormatter.ofPattern(CREATE_DATE_PATTERN)
                                 .withZone(ZoneId.systemDefault());
                         date = LocalDate.parse(txt, formatter);
                         uniqueDates.add(date);
-                        System.out.println("  " + key + " : " + date);
+                        LOGGER.info("  " + key + " : " + date);
                         break;
                     }
                 }
                 uniqueContents.add(this);
             } catch (Exception e) {
-                e.printStackTrace();
+                LOGGER.log(Level.WARNING, e.getMessage(), e);
             }
         }
 
@@ -200,6 +205,8 @@ public class Main {
 
     private static class Producer implements Runnable {
 
+        private static final Logger LOGGER = Logger.getLogger(Producer.class.getName());
+
         @Override
         public void run() {
             try {
@@ -212,7 +219,7 @@ public class Main {
                 xmlReader.setErrorHandler(new MyErrorHandler());
                 xmlReader.parse(BUCKET);
             } catch (Exception e) {
-                e.printStackTrace();
+                LOGGER.log(Level.WARNING, e.getMessage(), e);
             }
         }
 
@@ -246,7 +253,7 @@ public class Main {
 
             public void characters(char ch[], int start, int length) throws SAXException {
                 String s = new String(ch, start, length);
-                System.out.println(Thread.currentThread().getName() + ": characters " + s);
+                LOGGER.info("characters " + s);
                 if (NAME_NODE.equals(currentNode)) {
                     if (name == null)
                         name = s;
@@ -261,21 +268,21 @@ public class Main {
             }
 
             public void endDocument() throws SAXException {
-                System.out.println(Thread.currentThread().getName() + ": " + name);
-                System.out.println(Thread.currentThread().getName() + ": endDocument");
+                LOGGER.info(name);
+                LOGGER.info("endDocument");
             }
 
             public void endElement(String uri, String localName, String qName) throws SAXException {
-                System.out.println(Thread.currentThread().getName() + ": endElement " + qName);
+                LOGGER.info("endElement " + qName);
                 if (CONTENTS_NODE.equals(qName)) {
-                    System.out.println(Thread.currentThread().getName() + ": Produced " + contents);
+                    LOGGER.info("Produced " + contents);
                     try {
                         if (contents.isValid())
                             sharedQueue.put(contents);
                         else
-                            System.out.println(Thread.currentThread().getName() + ": Invalid " + contents);
+                            LOGGER.info("Invalid " + contents);
                     } catch (InterruptedException e) {
-                        e.printStackTrace();
+                        LOGGER.log(Level.WARNING, e.getMessage(), e);
                     }
                     contents = null;
                 }
@@ -283,12 +290,12 @@ public class Main {
             }
 
             public void startDocument() throws SAXException {
-                System.out.println(Thread.currentThread().getName() + ": startDocument");
+                LOGGER.info("startDocument");
             }
 
             public void startElement(String uri, String localName, String qName, Attributes attributes)
                     throws SAXException {
-                System.out.println(Thread.currentThread().getName() + ": startElement " + qName);
+                LOGGER.info("startElement " + qName);
 
                 currentNode = qName;
                 if (CONTENTS_NODE.equals(qName)) {
@@ -311,7 +318,7 @@ public class Main {
             }
 
             public void warning(SAXParseException spe) throws SAXException {
-                System.err.println(Thread.currentThread().getName() + ": Warning: " + getParseExceptionInfo(spe));
+                LOGGER.warning("Warning: " + getParseExceptionInfo(spe));
             }
 
             private String getParseExceptionInfo(SAXParseException spe) {
