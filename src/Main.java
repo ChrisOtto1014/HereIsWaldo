@@ -83,40 +83,54 @@ public class Main {
                     break;
                 }
             } else if (input.startsWith(CMD_QUERY)) {
-                // TODO - error checks
                 // TODO - combine predicates
                 input = input.substring(CMD_QUERY.length()).trim();
                 if (input.startsWith(CMD_ARTIST)) {
                     input = input.substring(CMD_ARTIST.length()).trim();
-                    Pattern pattern = Pattern.compile(input);
-                    Set<Contents> matches = query(matchesArtist(pattern));
-                    dump(matches);
+                    if (input.isEmpty()) {
+                        System.err.println("Missing artist");
+                    } else {
+                        Pattern pattern = Pattern.compile(input);
+                        Set<Contents> matches = query(matchesArtist(pattern));
+                        dump(matches);
+                    }
                 } else if (input.startsWith(CMD_MAKE)) {
-                    input = input.substring(CMD_MAKE.length()).trim();
-                    Pattern pattern = Pattern.compile(input);
-                    Set<Contents> matches = query(matchesMake(pattern));
-                    dump(matches);
+                    if (input.isEmpty()) {
+                        System.err.println("Missing make");
+                    } else {
+                        input = input.substring(CMD_MAKE.length()).trim();
+                        Pattern pattern = Pattern.compile(input);
+                        Set<Contents> matches = query(matchesMake(pattern));
+                        dump(matches);
+                    }
                 } else if (input.startsWith(CMD_MODEL)) {
-                    input = input.substring(CMD_MODEL.length()).trim();
-                    Pattern pattern = Pattern.compile(input);
-                    Set<Contents> matches = query(matchesModel(pattern));
-                    dump(matches);
+                    if (input.isEmpty()) {
+                        System.err.println("Missing model");
+                    } else {
+                        input = input.substring(CMD_MODEL.length()).trim();
+                        Pattern pattern = Pattern.compile(input);
+                        Set<Contents> matches = query(matchesModel(pattern));
+                        dump(matches);
+                    }
                 } else if (input.startsWith(CMD_DATE)) {
                     input = input.substring(CMD_DATE.length()).trim();
                     String[] inputs = input.split("-");
                     Predicate<Contents> p = null;
-                    for (int i = 0; i < inputs.length; i++) {
-                        int value = Integer.parseInt(inputs[i]);
-                        if (i == 0)
-                            p = matchesYear(value);
-                        else if (i == 1)
-                            p = p.and(matchesMonth(value));
-                        else if (i == 2)
-                            p = p.and(matchesDay(value));
+                    try {
+                        for (int i = 0; i < inputs.length; i++) {
+                            int value = Integer.parseInt(inputs[i]);
+                            if (i == 0)
+                                p = matchesYear(value);
+                            else if (i == 1)
+                                p = p.and(matchesMonth(value));
+                            else if (i == 2)
+                                p = p.and(matchesDay(value));
+                        }
+                        Set<Contents> matches = query(p);
+                        dump(matches);
+                    } catch (NumberFormatException ex) {
+                        System.err.println("Invalid date");
                     }
-                    Set<Contents> matches = query(p);
-                    dump(matches);
-
                 } else {
                     System.err.println("Unknown command");
                 }
