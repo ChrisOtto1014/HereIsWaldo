@@ -5,14 +5,17 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
 import java.util.Objects;
+import java.util.Scanner;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import javax.xml.parsers.SAXParser;
@@ -31,12 +34,20 @@ import org.xml.sax.helpers.DefaultHandler;
 public class Main {
 
     private static final String BUCKET = "http://s3.amazonaws.com/waldo-recruiting";
+    private static final String CMD_ARTIST = "artist";
+    private static final String CMD_DATE = "date";
+
+    private static final String CMD_LIST = "list";
+    private static final String CMD_MAKE = "make";
+    private static final String CMD_MODEL = "model";
+    private static final String CMD_QUERY = "query";
     private static final ExecutorService executor3 = Executors.newFixedThreadPool(2);
+
     // TODO - mimic messaging service of sorts to hand-off from one process to another
     private static final BlockingQueue<Contents> sharedQueue = new LinkedBlockingQueue<>();
-
     // TODO - use database
     private static final Set<String> uniqueArtists = new TreeSet<>();
+
     private static final Set<Contents> uniqueContents = new HashSet<>();
     private static final Set<LocalDate> uniqueDates = new TreeSet<>();
     private static final Set<String> uniqueMakes = new TreeSet<>();
@@ -50,30 +61,96 @@ public class Main {
 
         executor1.execute(new Consumer());
         executor2.execute(new Producer());
+
+        Scanner s = new Scanner(System.in);
+        System.out.print("command>");
+        String input;
+        while ((input = s.nextLine()) != null) {
+            if (input.startsWith(CMD_LIST)) {
+                input = input.substring(CMD_LIST.length()).trim();
+                switch (input) {
+                case CMD_ARTIST:
+                    dump(uniqueArtists);
+                    break;
+                case CMD_DATE:
+                    dump(uniqueDates);
+                    break;
+                case CMD_MAKE:
+                    dump(uniqueMakes);
+                    break;
+                case CMD_MODEL:
+                    dump(uniqueModels);
+                    break;
+                }
+            } else if (input.startsWith(CMD_QUERY)) {
+                // TODO - combine predicates
+                input = input.substring(CMD_QUERY.length()).trim();
+                if (input.startsWith(CMD_ARTIST)) {
+                    input = input.substring(CMD_ARTIST.length()).trim();
+                    Pattern pattern = Pattern.compile(input);
+                    Set<Contents> matches = query(matchesArtist(pattern));
+                    dump(matches);
+                } else if (input.startsWith(CMD_MAKE)) {
+                    input = input.substring(CMD_MAKE.length()).trim();
+                    Pattern pattern = Pattern.compile(input);
+                    Set<Contents> matches = query(matchesMake(pattern));
+                    dump(matches);
+                } else if (input.startsWith(CMD_MODEL)) {
+                    input = input.substring(CMD_MODEL.length()).trim();
+                    Pattern pattern = Pattern.compile(input);
+                    Set<Contents> matches = query(matchesModel(pattern));
+                    dump(matches);
+                } else if (input.startsWith(CMD_DATE)) {
+                    input = input.substring(CMD_DATE.length()).trim();
+                    Pattern pattern = Pattern.compile(input);
+                } else {
+                    System.err.println("Unknown command");
+                }
+            } else {
+                System.err.println("Unknown command " + input);
+            }
+            System.out.println();
+            System.out.print("command>");
+        }
+
     }
 
-    // TODO - regex
-    private static Set<Contents> queryOnArtist(String artist) {
-        return uniqueContents.stream().filter(c -> Objects.equals(artist, c.artist))
-                .collect(Collectors.toCollection(TreeSet::new));
+    private static void dump(Set<?> set) {
+        System.out.println(set.stream().map(e -> e.toString()).collect(Collectors.joining("\n")));
+    }
+
+    private static Predicate<Contents> isArtist(String artist) {
+        return c -> Objects.equals(artist, c.artist);
+    }
+
+    private static Predicate<Contents> isMake(String make) {
+        return c -> Objects.equals(make, c.make);
+    }
+
+    private static Predicate<Contents> isModel(String model) {
+        return c -> Objects.equals(model, c.model);
+    }
+
+    private static Predicate<Contents> matchesArtist(Pattern pattern) {
+        return c -> (c.artist != null) && pattern.matcher(c.artist).matches();
+    }
+
+    private static Predicate<Contents> matchesMake(Pattern pattern) {
+        return c -> (c.make != null) && pattern.matcher(c.make).matches();
+    }
+
+    private static Predicate<Contents> matchesModel(Pattern pattern) {
+        return c -> (c.model != null) && pattern.matcher(c.model).matches();
+    }
+
+    private static Set<Contents> query(Predicate<Contents> p) {
+        return uniqueContents.stream().filter(p).collect(Collectors.toCollection(HashSet::new));
     }
 
     // TODO - more robust - allow "around noon", etc
     private static Set<Contents> queryOnDate(LocalDate date) {
         return uniqueContents.stream().filter(c -> Objects.equals(date, c.date))
-                .collect(Collectors.toCollection(TreeSet::new));
-    }
-
-    // TODO - regex
-    private static Set<Contents> queryOnMake(String make) {
-        return uniqueContents.stream().filter(c -> Objects.equals(make, c.make))
-                .collect(Collectors.toCollection(TreeSet::new));
-    }
-
-    // TODO - regex
-    private static Set<Contents> queryOnModel(String model) {
-        return uniqueContents.stream().filter(c -> Objects.equals(model, c.model))
-                .collect(Collectors.toCollection(TreeSet::new));
+                .collect(Collectors.toCollection(HashSet::new));
     }
 
     private static class Consumer implements Runnable {
@@ -97,10 +174,10 @@ public class Main {
     }
 
     private static class Contents {
-        private static final Logger LOGGER = Logger.getLogger(Contents.class.getName());
         private static final String ARTIST = "Artist";
         private static final String CREATE_DATE = "Create Date";
         private static final String CREATE_DATE_PATTERN = "yyyy:MM:dd HH:mm:ss";
+        private static final Logger LOGGER = Logger.getLogger(Contents.class.getName());
         private static final String MAKE = "Make";
         private static final String MODEL = "Model";
         String artist;
@@ -172,8 +249,10 @@ public class Main {
             }
         }
 
+        @Override
         public String toString() {
-            return filename + ", size = " + size + ", lastModified = " + lastModified;
+            return "Contents [artist=" + artist + ", date=" + date + ", filename=" + filename + ", lastModified="
+                    + lastModified + ", make=" + make + ", model=" + model + ", size=" + size + "]";
         }
 
         private String trim(String s) {
