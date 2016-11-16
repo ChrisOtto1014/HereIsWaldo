@@ -83,6 +83,7 @@ public class Main {
                     break;
                 }
             } else if (input.startsWith(CMD_QUERY)) {
+                // TODO - error checks
                 // TODO - combine predicates
                 input = input.substring(CMD_QUERY.length()).trim();
                 if (input.startsWith(CMD_ARTIST)) {
@@ -102,7 +103,20 @@ public class Main {
                     dump(matches);
                 } else if (input.startsWith(CMD_DATE)) {
                     input = input.substring(CMD_DATE.length()).trim();
-                    Pattern pattern = Pattern.compile(input);
+                    String[] inputs = input.split("-");
+                    Predicate<Contents> p = null;
+                    for (int i = 0; i < inputs.length; i++) {
+                        int value = Integer.parseInt(inputs[i]);
+                        if (i == 0)
+                            p = matchesYear(value);
+                        else if (i == 1)
+                            p = p.and(matchesMonth(value));
+                        else if (i == 2)
+                            p = p.and(matchesDay(value));
+                    }
+                    Set<Contents> matches = query(p);
+                    dump(matches);
+
                 } else {
                     System.err.println("Unknown command");
                 }
@@ -112,7 +126,19 @@ public class Main {
             System.out.println();
             System.out.print("command>");
         }
+    }
 
+    // TODO - more robust - allow "around noon", etc
+    private static Predicate<Contents> matchesYear(int year) {
+        return c -> (c.date != null) && (c.date.getYear() == year);
+    }
+
+    private static Predicate<Contents> matchesMonth(int month) {
+        return c -> (c.date != null) && (c.date.getMonthValue() == month);
+    }
+
+    private static Predicate<Contents> matchesDay(int day) {
+        return c -> (c.date != null) && (c.date.getDayOfMonth() == day);
     }
 
     private static void dump(Set<?> set) {
@@ -145,12 +171,6 @@ public class Main {
 
     private static Set<Contents> query(Predicate<Contents> p) {
         return uniqueContents.stream().filter(p).collect(Collectors.toCollection(HashSet::new));
-    }
-
-    // TODO - more robust - allow "around noon", etc
-    private static Set<Contents> queryOnDate(LocalDate date) {
-        return uniqueContents.stream().filter(c -> Objects.equals(date, c.date))
-                .collect(Collectors.toCollection(HashSet::new));
     }
 
     private static class Consumer implements Runnable {
